@@ -33,3 +33,5 @@ build/
 .vscode/
 
 logs
+
+backend-service/src/main/resources/application.yaml

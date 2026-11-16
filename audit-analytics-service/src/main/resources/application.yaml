@@ -1,0 +1,16 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: audit-analytics-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/edupulse_db
+    username: postgres
+    password: password
+    driver-class-name: org.postgresql.Driver
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
