@@ -6,7 +6,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.5</version>
+        <version>4.0.8</version>
         <relativePath/>
     </parent>
 
@@ -17,18 +17,20 @@
     <name>EduPulse AI - Parent</name>
     <description>EduPulse AI - Intelligent Multi-Tenant Compliance and Audit Assistant</description>
 
+    <!-- Strict 3 microservicii, cate unul per membru al echipei -->
     <modules>
-        <module>discovery-service</module>
-        <module>api-gateway</module>
-        <module>document-ingestion-service</module>
+        <!-- Membru 1: Eureka Discovery + API Gateway (JWT / RBAC) + Document Ingestion -->
+        <module>gateway-ingestion-service</module>
+        <!-- Membru 2: Core Advanced RAG & AI Orchestration -->
         <module>rag-query-service</module>
+        <!-- Membru 3: Agentic Gap Analysis, Audit Trail & Analytics -->
         <module>audit-analytics-service</module>
     </modules>
 
     <properties>
         <java.version>21</java.version>
-        <spring-ai.version>1.0.0-M3</spring-ai.version>
-        <spring-cloud.version>2023.0.3</spring-cloud.version>
+        <spring-ai.version>2.0.1</spring-ai.version>
+        <spring-cloud.version>2025.1.4</spring-cloud.version>
     </properties>
 
     <dependencyManagement>

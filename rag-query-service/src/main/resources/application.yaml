@@ -1,13 +1,15 @@
+# Microserviciul 2 (Membru 2): Core Advanced RAG & AI Orchestration
+# Accesibil din exterior doar prin gateway-ingestion-service (http://localhost:8080/api/rag/**)
 server:
-  port: 8082
+  port: 8081
 
 spring:
   application:
     name: rag-query-service
   datasource:
-    url: jdbc:postgresql://localhost:5432/edupulse_db
+    url: jdbc:postgresql://localhost:5434/edupulse_db
     username: postgres
-    password: password
+    password: postgres
     driver-class-name: org.postgresql.Driver
   ai:
     openai:
@@ -15,8 +17,25 @@ spring:
       chat:
         options:
           model: gpt-4o
+      embedding:
+        options:
+          model: text-embedding-3-small
+    vectorstore:
+      pgvector:
+        initialize-schema: false # schema este creata de gateway-ingestion-service
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        dimensions: 1536
 
 eureka:
   client:
     service-url:
-      defaultZone: http://localhost:8761/eureka/
+      defaultZone: http://localhost:8080/eureka/
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

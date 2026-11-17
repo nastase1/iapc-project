@@ -32,6 +32,22 @@ build/
 ### VS Code ###
 .vscode/
 
-logs
+logs/
+*.log
 
-backend-service/src/main/resources/application.yaml
+
+### Secrete & configurari locale (OPENAI_API_KEY, JWT_SECRET etc.) ###
+.env
+.env.*
+!.env.example
+**/src/main/resources/application-local.yaml
+**/src/main/resources/application-local.yml
+
+### Fisiere incarcate / generate la rulare ###
+uploads/
+reports-output/
+
+### OS ###
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -6,38 +6,43 @@ EduPulse AI este o platformă inteligentă de asistență pentru conformitate ș
 
 ## 🏛️ Arhitectura pe Microservicii
 
-Proiectul este structurat ca un proiect Maven multi-modul, utilizând **Spring Boot 3.x / Java 21**, **Spring Cloud** (Eureka, Gateway) și **Spring AI 2.0+** conectat la **PostgreSQL + pgvector**:
+Proiectul este structurat ca un proiect Maven multi-modul cu **strict 3 microservicii** – câte unul pentru fiecare membru al echipei – utilizând **Spring Boot 4 / Java 21**, **Spring Cloud 2025.1** (Eureka, Gateway Server MVC, LoadBalancer) și **Spring AI 2.0+** conectat la **PostgreSQL + pgvector**:
 
 ```
                                 [ Frontend / Client ]
-                                          │
+                                          │  JWT (Bearer)
                                           ▼
-                          ┌───────────────────────────────┐
-                          │    API Gateway (Port 8080)    │
-                          │  (Securitate JWT & Rutare)    │
-                          └───────────────┬───────────────┘
-                                          │
-                  ┌───────────────────────┼───────────────────────┐
-                  ▼                       ▼                       ▼
-        ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-        │ Document         │    │ Compliance RAG   │    │ Gap Analysis &   │
-        │ Ingestion Svc    │    │ Query Engine     │    │ Audit Trail Svc  │
-        │ (Port 8081)      │    │ (Port 8082)      │    │ (Port 8083)      │
-        └─────────┬────────┘    └─────────┬────────┘    └─────────┬────────┘
-                  │                       │                       │
-                  └───────────────────────┼───────────────────────┘
-                                          ▼
-                            ┌───────────────────────────┐
-                            │    Eureka Discovery Svc   │
-                            │        (Port 8761)        │
-                            └───────────────────────────┘
-                                          │
+        ┌──────────────────────────────────────────────────────────────────┐
+        │  [1] gateway-ingestion-service (Port 8080)          — Membru 1   │
+        │  ┌──────────────┐ ┌──────────────────┐ ┌──────────────────────┐  │
+        │  │ Eureka Server│ │ API Gateway      │ │ Document Ingestion   │  │
+        │  │ /eureka      │ │ JWT + RBAC,      │ │ /api/ingestion/**    │  │
+        │  │              │ │ rutare lb://     │ │ async + hierarchical │  │
+        │  └──────────────┘ └────────┬─────────┘ │ chunking             │  │
+        │                            │           └──────────┬───────────┘  │
+        └────────────────────────────┼──────────────────────┼──────────────┘
+                 X-Tenant-Id,        │                      │
+                 X-Org-Unit, ...     │                      │
+                  ┌──────────────────┴─────┐                │
+                  ▼                        ▼                │
+        ┌──────────────────┐    ┌──────────────────┐        │
+        │ [2] rag-query-   │◄───│ [3] audit-       │        │
+        │ service          │    │ analytics-service│        │
+        │ (Port 8081)      │    │ (Port 8082)      │        │
+        │ — Membru 2       │    │ — Membru 3       │        │
+        └─────────┬────────┘    └─────────┬────────┘        │
+                  │                       │                 │
+                  └───────────────────────┼─────────────────┘
                                           ▼
                             ┌───────────────────────────┐
                             │   PostgreSQL + pgvector   │
                             │    (Relational + HNSW)    │
                             └───────────────────────────┘
 ```
+
+* **Un singur punct de intrare:** clienții apelează doar portul `8080`. Gateway-ul validează token-ul JWT, aplică RBAC și rutează prin Eureka (`lb://rag-query-service`, `lb://audit-analytics-service`). Endpoint-urile de ingestie sunt servite local.
+* **Propagarea contextului de tenancy:** gateway-ul suprascrie headerele `X-Tenant-Id`, `X-Org-Unit`, `X-User-Id`, `X-User-Roles` cu valorile din JWT (valorile trimise de client sunt ignorate).
+* **Comunicare inter-servicii:** `audit-analytics-service` apelează `rag-query-service` prin `RagQueryClient` (`RestClient` `@LoadBalanced`, rezolvat prin Eureka).
 
 ---
 
@@ -46,11 +51,11 @@ Proiectul este structurat ca un proiect Maven multi-modul, utilizând **Spring B
 Pentru o distribuire echilibrată a complexității, sarcinile sunt împărțite între cei 3 membri ai echipei astfel:
 
 ### 🔹 Membru 1: Infrastructură Cloud, Securitate & Ingestion Asincron
-* **Module alocate:** `discovery-service`, `api-gateway`, `document-ingestion-service`
+* **Microserviciu alocat:** `gateway-ingestion-service` (Eureka Server + API Gateway + Document Ingestion într-un singur serviciu)
 * **Responsabilități principale:**
   1. **Service Discovery & Gateway:**
-     - Configurare `discovery-service` (Eureka Server) pentru clusterizare și reziliență.
-     - Configurare `api-gateway` (Spring Cloud Gateway) cu rutare dinamică bazată pe Service ID (`lb://...`).
+     - Configurare Eureka Server (embedded în `gateway-ingestion-service`) pentru clusterizare și reziliență.
+     - Configurare API Gateway (Spring Cloud Gateway Server MVC) cu rutare dinamică bazată pe Service ID (`lb://...`).
   2. **Securitate & Tenancy:**
      - Autentificare și autorizare stateless via token-uri JWT la nivel de API Gateway.
      - Controlul accesului bazat pe roluri (RBAC): `ROLE_ADMIN`, `ROLE_COMPLIANCE_OFFICER`.
@@ -63,7 +68,7 @@ Pentru o distribuire echilibrată a complexității, sarcinile sunt împărțite
 ---
 
 ### 🔹 Membru 2: Core Advanced RAG & AI Orchestration
-* **Module alocate:** `rag-query-service`
+* **Microserviciu alocat:** `rag-query-service`
 * **Responsabilități principale:**
   1. **Pre-Retrieval:**
      - Implementarea `MultiQueryExpander`: rescrierea automată a prompt-ului utilizatorului în 3-4 formulări din unghiuri tehnice diferite pentru a maximiza recall-ul.
@@ -81,7 +86,7 @@ Pentru o distribuire echilibrată a complexității, sarcinile sunt împărțite
 ---
 
 ### 🔹 Membru 3: Agentic Gap Analysis, Audit Trail & Analytics
-* **Module alocate:** `audit-analytics-service`
+* **Microserviciu alocat:** `audit-analytics-service`
 * **Responsabilități principale:**
   1. **Automated Gap Analysis (Agentic Workflow):**
      - Flux autonom care preia un document nou de reglementare, îl descompune chunk-cu-chunk, interoghează baza de politici existente (`rag-query-service`) și generează un raport structurat cu decalajele de conformitate identificate.
@@ -97,29 +102,35 @@ Pentru o distribuire echilibrată a complexității, sarcinile sunt împărțite
 ## 📁 Structura Directoarelor Proiectului
 
 ```text
-├── pom.xml                           # Root Maven POM (Multi-module)
-├── discovery-service/                # Port 8761 - Eureka Service Registry
-├── api-gateway/                      # Port 8080 - Spring Cloud Gateway & JWT
-├── document-ingestion-service/       # Port 8081 - Ingestie asincrona & Hierarchical Chunking
-├── rag-query-service/                # Port 8082 - Advanced RAG & Hybrid Search (pgvector + tsvector)
-├── audit-analytics-service/          # Port 8083 - Gap Analysis Agent & Audit Trail
-├── docker/
-│   └── postgres/
-│       └── pgvector.yml              # PostgreSQL cu extensia pgvector
-└── backend-service/                  # Codul initial monolitic de la laborator (referinta)
+├── pom.xml                           # Root Maven POM (Multi-module, 3 module)
+├── mvnw / mvnw.cmd / .mvn/           # Maven Wrapper
+├── gateway-ingestion-service/        # [1] Port 8080 - Eureka + API Gateway (JWT/RBAC) + Ingestie asincrona
+│   └── src/main/java/com/edupulse/gateway/
+│       ├── security/                 #     JWT (HS256), RBAC, emitere token-uri demo
+│       ├── routing/                  #     Rute lb:// + propagare tenant din JWT
+│       └── ingestion/                #     Upload & Hierarchical Chunking
+├── rag-query-service/                # [2] Port 8081 - Advanced RAG & Hybrid Search (pgvector + tsvector)
+├── audit-analytics-service/          # [3] Port 8082 - Gap Analysis Agent & Audit Trail
+└── docker/
+    └── postgres/
+        ├── pgvector.yml              # PostgreSQL cu extensia pgvector (port 5434, DB edupulse_db)
+        └── init.sql                  # Extensii vector / hstore / uuid-ossp
 ```
 
 ---
 
 ## 🔌 Porturi și Endpoint-uri Principale
 
-| Serviciu | Port | Endpoint Cheie | Descriere |
-| :--- | :--- | :--- | :--- |
-| **API Gateway** | `8080` | `/api/**` | Punct unic de intrare, rutare și securitate |
-| **Discovery Service** | `8761` | `/eureka` | Panou de control și registru Eureka |
-| **Document Ingestion** | `8081` | `POST /api/ingestion/upload` | Upload & ingestie asincronă documente |
-| **RAG Query Engine** | `8082` | `POST /api/rag/query` | Interogare Advanced RAG cu citări |
-| **Audit & Gap Analysis** | `8083` | `POST /api/gap-analysis/run` | Declanșare raport de analiză a decalajelor |
+Toate apelurile client trec prin `http://localhost:8080`.
+
+| Microserviciu | Port | Endpoint Cheie | Roluri | Descriere |
+| :--- | :--- | :--- | :--- | :--- |
+| **[1] Gateway & Ingestion** | `8080` | `POST /api/auth/token` | public | Emitere JWT (utilizatori demo `admin`/`admin`, `officer`/`officer`) |
+| | | `POST /api/ingestion/upload` | ADMIN, COMPLIANCE_OFFICER | Upload & ingestie asincronă documente |
+| | | `/eureka-ui`, `/eureka/**` | public (rețea internă) | Dashboard și registru Eureka |
+| **[2] RAG Query Engine** | `8081` | `POST /api/rag/query` | ADMIN, COMPLIANCE_OFFICER | Interogare Advanced RAG cu citări |
+| **[3] Audit & Gap Analysis** | `8082` | `POST /api/gap-analysis/run` | ADMIN, COMPLIANCE_OFFICER | Declanșare raport de analiză a decalajelor |
+| | | `/api/audit/**` | ADMIN | Audit trail & rapoarte |
 
 ---
 
@@ -130,22 +141,21 @@ Pentru o distribuire echilibrată a complexității, sarcinile sunt împărțite
 docker compose -f docker/postgres/pgvector.yml up -d
 ```
 
-### 2. Setarea Cheii de API (OpenAI)
+### 2. Setarea Cheilor (OpenAI, JWT)
 ```powershell
 $env:OPENAI_API_KEY="sk-..."
+$env:JWT_SECRET="un-secret-de-minim-32-de-caractere..."   # optional in dev
 ```
 
-### 3. Pornirea Microserviciilor (în ordine)
-1. **Discovery Service:**
-   ```powershell
-   cd discovery-service; ..\backend-service\mvnw.cmd spring-boot:run
-   ```
-2. **API Gateway:**
-   ```powershell
-   cd api-gateway; ..\backend-service\mvnw.cmd spring-boot:run
-   ```
-3. **Serviciile de Business:**
-   Porniți în terminale separate:
-   - `document-ingestion-service`
-   - `rag-query-service`
-   - `audit-analytics-service`
+### 3. Pornirea Microserviciilor (în ordine, în terminale separate)
+```powershell
+.\mvnw.cmd -pl gateway-ingestion-service spring-boot:run   # primul: gazduieste Eureka
+.\mvnw.cmd -pl rag-query-service spring-boot:run
+.\mvnw.cmd -pl audit-analytics-service spring-boot:run
+```
+
+### 4. Test rapid
+```powershell
+$t = (Invoke-RestMethod -Method Post http://localhost:8080/api/auth/token -ContentType 'application/json' -Body '{"username":"officer","password":"officer"}').access_token
+Invoke-RestMethod -Method Post http://localhost:8080/api/rag/query -Headers @{Authorization="Bearer $t"} -ContentType 'application/json' -Body '{"query":"GDPR data retention"}'
+```

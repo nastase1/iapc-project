@@ -1,0 +1,72 @@
+# Microserviciul 1 (Membru 1): Eureka Discovery + API Gateway (JWT / RBAC) + Document Ingestion
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway-ingestion-service
+  datasource:
+    url: jdbc:postgresql://localhost:5434/edupulse_db
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  servlet:
+    multipart:
+      # Gateway MVC dezactiveaza multipart daca proprietatea nu e setata explicit (necesar pentru upload)
+      enabled: true
+      max-file-size: 50MB
+      max-request-size: 50MB
+  ai:
+    model:
+      chat: none # acest microserviciu foloseste doar modelul de embeddings
+    openai:
+      api-key: ${OPENAI_API_KEY:demo-key}
+      embedding:
+        options:
+          model: text-embedding-3-small
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        dimensions: 1536
+
+edupulse:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:change-me-dev-only-secret-at-least-32-bytes!!}
+      ttl: 1h
+      issuer: edupulse-gateway
+    # Utilizatori demo pentru dezvoltare locala (POST /api/auth/token)
+    demo-users:
+      - username: admin
+        password: admin
+        tenant-id: default-org
+        org-unit: compliance
+        roles: [ ROLE_ADMIN ]
+      - username: officer
+        password: officer
+        tenant-id: default-org
+        org-unit: compliance
+        roles: [ ROLE_COMPLIANCE_OFFICER ]
+
+# Eureka Server embedded; clientul local doar citeste registry-ul (pentru rutarea lb://)
+eureka:
+  instance:
+    hostname: localhost
+  client:
+    register-with-eureka: false
+    fetch-registry: true
+    registry-fetch-interval-seconds: 5
+    service-url:
+      defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
+  server:
+    enable-self-preservation: false
+  dashboard:
+    path: /eureka-ui
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

@@ -10,12 +10,15 @@
 
     <artifactId>rag-query-service</artifactId>
     <name>RAG Query Service</name>
-    <description>Core Advanced RAG engine with Hybrid Search, Multi-Query Expansion, Reranking and Citations</description>
+    <description>
+        Membru 2: Core Advanced RAG engine - Multi-Query Expansion, Hybrid Search (pgvector + tsvector),
+        Reranking, Context Compression, Guardrails and Strict Source Citations
+    </description>
 
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.cloud</groupId>
@@ -41,6 +44,10 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-vector-store-advisor</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-rag</artifactId>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
