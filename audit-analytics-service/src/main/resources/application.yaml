@@ -23,6 +23,13 @@ spring:
         options:
           model: gpt-4o
 
+# Acelasi secret si issuer ca gateway-ul (JWT_SECRET trebuie identic in ambele servicii)
+edupulse:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:change-me-dev-only-secret-at-least-32-bytes!!}
+      issuer: ${JWT_ISSUER:edupulse-gateway}
+
 audit:
   gap-analysis:
     chunk-size: ${GAP_CHUNK_SIZE:1500}        # caractere per bucata de reglementare
