@@ -11,6 +11,9 @@ spring:
     username: postgres
     password: postgres
     driver-class-name: org.postgresql.Driver
+  sql:
+    init:
+      mode: always
   ai:
     model:
       embedding: none # agentul de gap analysis foloseste doar modelul de chat
@@ -19,6 +22,21 @@ spring:
       chat:
         options:
           model: gpt-4o
+
+# Acelasi secret si issuer ca gateway-ul (JWT_SECRET trebuie identic in ambele servicii)
+edupulse:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:change-me-dev-only-secret-at-least-32-bytes!!}
+      issuer: ${JWT_ISSUER:edupulse-gateway}
+
+audit:
+  gap-analysis:
+    chunk-size: ${GAP_CHUNK_SIZE:1500}        # caractere per bucata de reglementare
+    max-chunks: ${GAP_MAX_CHUNKS:100}         # plafon de cost per rulare
+    max-input-chars: ${GAP_MAX_INPUT_CHARS:500000}
+    concurrency: ${GAP_CONCURRENCY:4}         # analize simultane
+    queue-capacity: ${GAP_QUEUE_CAPACITY:20}  # in asteptare; peste limita => 429
 
 eureka:
   client:

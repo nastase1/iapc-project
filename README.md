@@ -129,8 +129,67 @@ All client calls go through `http://localhost:8080`.
 | | | `POST /api/ingestion/upload` | ADMIN, COMPLIANCE_OFFICER | Asynchronous document upload & ingestion |
 | | | `/eureka-ui`, `/eureka/**` | public (internal network) | Eureka dashboard and registry |
 | **[2] RAG Query Engine** | `8081` | `POST /api/rag/query` | ADMIN, COMPLIANCE_OFFICER | Advanced RAG query with citations |
-| **[3] Audit & Gap Analysis** | `8082` | `POST /api/gap-analysis/run` | ADMIN, COMPLIANCE_OFFICER | Trigger a gap analysis report |
-| | | `/api/audit/**` | ADMIN | Audit trail & reports |
+| **[3] Audit & Gap Analysis** | `8082` | `POST /api/gap-analysis/run` | ADMIN, COMPLIANCE_OFFICER | Start an asynchronous gap analysis (202) |
+| | | `GET /api/gap-analysis/reports[/{id}]` | ADMIN, COMPLIANCE_OFFICER | List reports / poll one report |
+| | | `GET /api/gap-analysis/reports/{id}/export` | ADMIN, COMPLIANCE_OFFICER | Export a finished report (json, csv, pdf) |
+| | | `POST /api/audit/events` | ADMIN, COMPLIANCE_OFFICER | Record an audit event (called by other services) |
+| | | `GET /api/audit/events`, `/export/json`, `/export/csv`, `/stats/latency` | ADMIN | Audit trail, export, latency NFR |
+
+---
+
+## 🔎 audit-analytics-service (Member 3)
+
+### Gap analysis (agentic workflow)
+`POST /api/gap-analysis/run` with `{"targetFramework": "SOX", "regulationText": "..."}` returns **202 Accepted** immediately with a `PENDING` report and a `Location` header. In the background the service:
+
+1. splits the regulation into structure-aware chunks (headings such as `Article`, `Section`, `1.2`, `#`);
+2. queries `rag-query-service` (through Eureka) for the existing internal policies matching each chunk;
+3. asks the LLM whether the policies cover the requirement (the regulation text is passed as data, never as instructions);
+4. stores the report and writes one audit event per chunk plus one for the final report.
+
+Poll `GET /api/gap-analysis/reports/{id}`: `PENDING` → `RUNNING` (with `analyzedChunks` growing) → `COMPLETED`, `PARTIAL` or `FAILED`.
+The report only lists requirements that are not covered (`GAP`) and requirements that could not be evaluated (`NOT_ASSESSED`, e.g. RAG or LLM unavailable): a failed evaluation is never reported as compliant or as a gap. A report is `PARTIAL` when some chunks were `NOT_ASSESSED` or the `GAP_MAX_CHUNKS` cap was reached.
+
+Export a `COMPLETED`/`PARTIAL` report with `GET /api/gap-analysis/reports/{id}/export?format=json|csv|pdf` (409 while the report is still running). Limitation: the PDF uses a standard font, so characters outside Latin-1 (e.g. Romanian diacritics) may not render.
+
+Backpressure: at most `GAP_CONCURRENCY` analyses run at once and `GAP_QUEUE_CAPACITY` wait; beyond that the API answers `429`. Texts above `GAP_MAX_INPUT_CHARS` are rejected with `413`. Analyses left unfinished by a restart are marked `FAILED` on startup.
+
+### Audit trail and latency NFR
+Every compliance query should be recorded so the context given to the LLM can be reviewed later. Other services call:
+
+```http
+POST /api/audit/events
+Authorization: Bearer <the user's JWT>
+Content-Type: application/json
+
+{"eventType": "RAG_QUERY", "userId": "...", "query": "...", "context": "chunks used", "answer": "...", "latencyMs": 420}
+```
+
+* The tenant comes from the JWT, never from the request: **forward the user's `Authorization` header**, otherwise the call is rejected with 401.
+* `GET /api/audit/stats/latency` returns p50 / p95 / max and whether p95 meets the 2.0 s NFR.
+* `GET /api/audit/export/json|csv` exports the tenant's audit trail (CSV cells are protected against formula injection).
+
+### Security of this service
+The service validates the gateway's JWT itself (HS256, same `JWT_SECRET` and issuer as the gateway) and enforces RBAC, so calling port 8082 directly gives no way around the gateway. `X-Tenant-Id` / `X-User-Id` are always overwritten with the values from the token. Unknown paths are denied, and `/actuator/**` except `health`/`info` is ADMIN-only.
+
+### Configuration (environment variables)
+
+| Variable | Default | Meaning |
+| :--- | :--- | :--- |
+| `JWT_SECRET` | dev-only value | HMAC secret (>= 32 bytes). **Must be identical to the gateway's.** Set a real one outside development. |
+| `JWT_ISSUER` | `edupulse-gateway` | Expected token issuer |
+| `OPENAI_API_KEY` | `demo-key` | Without a real key every chunk ends up `NOT_ASSESSED` |
+| `GAP_CHUNK_SIZE` | `1500` | Max characters per regulation chunk |
+| `GAP_MAX_CHUNKS` | `100` | Cost cap: chunks analysed per run |
+| `GAP_MAX_INPUT_CHARS` | `500000` | Max accepted regulation size |
+| `GAP_CONCURRENCY` / `GAP_QUEUE_CAPACITY` | `4` / `20` | Parallel analyses / waiting analyses |
+
+Tables (`audit_event`, `gap_report`, `gap_finding`) are created on startup from `schema.sql`. After starting the services, wait about 40 seconds for the instance to appear in Eureka before calling it through the gateway (otherwise: 503/500 `Unable to find instance`).
+
+### Tests
+```powershell
+.\mvnw.cmd -pl audit-analytics-service test
+```
 
 ---
 
