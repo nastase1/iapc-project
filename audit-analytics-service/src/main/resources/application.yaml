@@ -23,6 +23,14 @@ spring:
         options:
           model: gpt-4o
 
+audit:
+  gap-analysis:
+    chunk-size: ${GAP_CHUNK_SIZE:1500}        # caractere per bucata de reglementare
+    max-chunks: ${GAP_MAX_CHUNKS:100}         # plafon de cost per rulare
+    max-input-chars: ${GAP_MAX_INPUT_CHARS:500000}
+    concurrency: ${GAP_CONCURRENCY:4}         # analize simultane
+    queue-capacity: ${GAP_QUEUE_CAPACITY:20}  # in asteptare; peste limita => 429
+
 eureka:
   client:
     service-url:
