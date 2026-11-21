@@ -224,6 +224,31 @@ The service validates the gateway's JWT itself (HS256, same `JWT_SECRET` and iss
 
 Tables (`audit_event`, `gap_report`, `gap_finding`) are created on startup from `schema.sql`. After starting the services, wait about 40 seconds for the instance to appear in Eureka before calling it through the gateway (otherwise: 503/500 `Unable to find instance`).
 
+### Evaluation harness (`com.edupulse.audit.eval`)
+
+Measures retrieval quality (recall@k, MRR) of the RAG pipeline on a golden set of question → expected-source pairs (unanswerable questions have `"answerable": false`). One command runs it:
+
+```powershell
+# against the live system (gateway on 8080); the token is read from the environment
+$env:EVAL_TOKEN = "<jwt from POST /api/auth/token>"
+.\mvnw.cmd -q -pl audit-analytics-service compile exec:java "-Deval.args=--golden audit-analytics-service/eval/golden-set.json --url http://localhost:8080 --k 5 --out audit-analytics-service/eval/reports"
+
+# offline, from recorded results (CI, demos)
+.\mvnw.cmd -q -pl audit-analytics-service compile exec:java "-Deval.args=--golden audit-analytics-service/eval/golden-set.example.json --results audit-analytics-service/eval/recorded-results.example.json --out audit-analytics-service/target/eval-demo"
+```
+
+| Argument | Default | Meaning |
+| :--- | :--- | :--- |
+| `--golden` | `eval/golden-set.json` | Golden set file |
+| `--url` / `--results` | required (one of them) | Live system, or recorded results `{"<question>": ["source", ...]}` |
+| `--k` | `5` | Top-k |
+| `--out` | `eval/reports` | Writes `report.json` and `report.md` |
+| `--baseline` | none | Committed `report.json`; exit code `1` if recall@k or MRR dropped by more than `--max-drop` (default `0.02`) or failures increased |
+
+Exit codes: `0` ok, `1` regression, `2` bad arguments or unreadable input. A pipeline change must pass the run against the committed baseline before merge. Failed retrievals are logged, score 0 and are listed in the report instead of aborting the run.
+
+Current state: retrieval metrics only. Faithfulness is not measured yet (S4 T3), the live mode reads `citations[].source` from `POST /api/rag/query`, and `eval/golden-set.example.json` is invented sample data showing the format; the real golden set (30+ pairs) and the committed baseline report follow once ingestion (S1 T1) provides the sample documents.
+
 ### Tests
 ```powershell
 .\mvnw.cmd -pl audit-analytics-service test
