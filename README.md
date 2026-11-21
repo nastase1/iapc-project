@@ -137,6 +137,44 @@ All client calls go through `http://localhost:8080`.
 
 ---
 
+## 🛡️ Ingestion source security (SSRF controls)
+
+Package `com.edupulse.gateway.ingestion.security` in `gateway-ingestion-service`. Every external source (web page, remote PDF, repository docs) must be fetched through `SafeFetcher` and its text extracted through `ContentSanitizer`.
+
+| Control | Where | Proven by (negative test) |
+| :--- | :--- | :--- |
+| HTTPS only (`file:`, `ftp:`, `gopher:`, `javascript:`, scheme-relative rejected) | `UrlValidator` | `UrlValidatorTest.rejectsNonHttpsSchemes` |
+| Domain allowlist (subdomains allowed, lookalikes such as `notexample.com` rejected; empty list rejects all) | `UrlValidator` | `rejectsDomainOutsideAllowlist`, `rejectsLookalikeDomains`, `emptyAllowlistRejectsEverything` |
+| No credentials in the URL | `UrlValidator` | `rejectsCredentialsInUrl` |
+| Block localhost, private ranges (10/8, 172.16/12, 192.168/16), link-local, CGNAT, IPv6 loopback/ULA, IPv4-mapped IPv6; every resolved address is checked | `UrlValidator` | `blocksHostResolvingTo*`, `blocksIpv4MappedIpv6Loopback`, `blocksWhenAnyResolvedAddressIsPrivate` |
+| Block cloud metadata (`169.254.169.254`, `fd00:ec2::254`) | `UrlValidator` | `blocksCloudMetadataAddress`, `blocksLiteralInternalHostsEvenWhenListedInAllowlist` |
+| Timeout | `SafeFetcher` | `SafeFetcherTest.enforcesTimeout` |
+| Size limit (streamed read) | `SafeFetcher` | `rejectsResponseOverSizeLimit` |
+| Content-type allowlist | `SafeFetcher` | `rejectsDisallowedContentType` |
+| Redirects re-validated (max 3) | `SafeFetcher` | `revalidatesRedirectTarget`, `stopsRedirectLoops` |
+| Scripts and active content stripped (`script`, `style`, `iframe`, `object`, `embed`, `form`, `on*` handlers, `javascript:` URLs) | `ContentSanitizer` | `ContentSanitizerTest` |
+
+Blocked sources are logged at `WARN` (`Blocked ingestion source ...`) with the reason. A blocked source raises `UrlSafetyException`; the batch caller is expected to catch it per source so one failure does not stop the rest.
+
+Configuration (`edupulse.ingestion.fetch.*`):
+
+| Property / env var | Default | Meaning |
+| :--- | :--- | :--- |
+| `allowed-domains` / `INGESTION_ALLOWED_DOMAINS` | empty (nothing allowed) | Comma-separated domains, subdomains included |
+| `https-only` | `true` | Reject plain HTTP |
+| `timeout` | `10s` | Connect and response timeout |
+| `max-bytes` | `5242880` | Maximum response size |
+| `allowed-content-types` | `text/html,application/pdf,text/plain,text/markdown` | Accepted `Content-Type` values |
+| `max-redirects` | `3` | Redirects followed, each re-validated |
+
+Known limitation: DNS is resolved once for validation and again for the connection (DNS rebinding window); the domain allowlist limits the exposure.
+
+```powershell
+.\mvnw.cmd -pl gateway-ingestion-service test
+```
+
+---
+
 ## 🔎 audit-analytics-service (Member 3)
 
 ### Gap analysis (agentic workflow)
