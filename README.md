@@ -137,6 +137,60 @@ All client calls go through `http://localhost:8080`.
 
 ---
 
+## 🧵 Neighbor stitching (`rag-query-service`, `com.edupulse.rag.postretrieval`)
+
+`NeighborStitcher.stitch(hits, window, tokenBudget)` expands each retrieved chunk with its adjacent chunks (by `chunk_index`), merges runs of adjacent chunks into one `Passage` and removes the text overlap between them.
+
+* **Overlap dedup:** the longest suffix of the previous chunk that is also a prefix of the next one is dropped, only if it has at least `minOverlapChars` characters (shorter coincidences are kept so real text is never cut). Set `minOverlapChars` below the chunker's overlap size.
+* **Token budget:** retrieved chunks are taken first (rank order), then neighbors, nearest first, alternating before/after. A chunk that does not fit is skipped. `Passage.tokens` is the sum of the chunk tokens before overlap removal, so the real size is never above the budget. The default counter `NeighborStitcher.APPROX_TOKENS` is a rough 4 chars/token; pass the real tokenizer when available.
+* **Boundaries:** a neighbor must have the same `docId` and `version` as the hit and the requested `chunk_index`, whatever the lookup returns, so stitching never crosses documents or mixes versions.
+* **Edges:** first chunk (no previous), last chunk (no next) and single-chunk documents are covered by tests.
+* **Integration (TODO):** implement `ChunkNeighborLookup` on top of pgvector (`doc_id`, `version`, `chunk_index` metadata, from S1 T1) and call the stitcher after reranking. Tests use an in-memory lookup.
+
+```powershell
+.\mvnw.cmd -pl rag-query-service test
+```
+
+---
+
+## 🛡️ Ingestion source security (SSRF controls)
+
+Package `com.edupulse.gateway.ingestion.security` in `gateway-ingestion-service`. Every external source (web page, remote PDF, repository docs) must be fetched through `SafeFetcher` and its text extracted through `ContentSanitizer`.
+
+| Control | Where | Proven by (negative test) |
+| :--- | :--- | :--- |
+| HTTPS only (`file:`, `ftp:`, `gopher:`, `javascript:`, scheme-relative rejected) | `UrlValidator` | `UrlValidatorTest.rejectsNonHttpsSchemes` |
+| Domain allowlist (subdomains allowed, lookalikes such as `notexample.com` rejected; empty list rejects all) | `UrlValidator` | `rejectsDomainOutsideAllowlist`, `rejectsLookalikeDomains`, `emptyAllowlistRejectsEverything` |
+| No credentials in the URL | `UrlValidator` | `rejectsCredentialsInUrl` |
+| Block localhost, private ranges (10/8, 172.16/12, 192.168/16), link-local, CGNAT, IPv6 loopback/ULA, IPv4-mapped IPv6; every resolved address is checked | `UrlValidator` | `blocksHostResolvingTo*`, `blocksIpv4MappedIpv6Loopback`, `blocksWhenAnyResolvedAddressIsPrivate` |
+| Block cloud metadata (`169.254.169.254`, `fd00:ec2::254`) | `UrlValidator` | `blocksCloudMetadataAddress`, `blocksLiteralInternalHostsEvenWhenListedInAllowlist` |
+| Timeout | `SafeFetcher` | `SafeFetcherTest.enforcesTimeout` |
+| Size limit (streamed read) | `SafeFetcher` | `rejectsResponseOverSizeLimit` |
+| Content-type allowlist | `SafeFetcher` | `rejectsDisallowedContentType` |
+| Redirects re-validated (max 3) | `SafeFetcher` | `revalidatesRedirectTarget`, `stopsRedirectLoops` |
+| Scripts and active content stripped (`script`, `style`, `iframe`, `object`, `embed`, `form`, `on*` handlers, `javascript:` URLs) | `ContentSanitizer` | `ContentSanitizerTest` |
+
+Blocked sources are logged at `WARN` (`Blocked ingestion source ...`) with the reason. A blocked source raises `UrlSafetyException`; the batch caller is expected to catch it per source so one failure does not stop the rest.
+
+Configuration (`edupulse.ingestion.fetch.*`):
+
+| Property / env var | Default | Meaning |
+| :--- | :--- | :--- |
+| `allowed-domains` / `INGESTION_ALLOWED_DOMAINS` | empty (nothing allowed) | Comma-separated domains, subdomains included |
+| `https-only` | `true` | Reject plain HTTP |
+| `timeout` | `10s` | Connect and response timeout |
+| `max-bytes` | `5242880` | Maximum response size |
+| `allowed-content-types` | `text/html,application/pdf,text/plain,text/markdown` | Accepted `Content-Type` values |
+| `max-redirects` | `3` | Redirects followed, each re-validated |
+
+Known limitation: DNS is resolved once for validation and again for the connection (DNS rebinding window); the domain allowlist limits the exposure.
+
+```powershell
+.\mvnw.cmd -pl gateway-ingestion-service test
+```
+
+---
+
 ## 🔎 audit-analytics-service (Member 3)
 
 ### Gap analysis (agentic workflow)
@@ -185,6 +239,31 @@ The service validates the gateway's JWT itself (HS256, same `JWT_SECRET` and iss
 | `GAP_CONCURRENCY` / `GAP_QUEUE_CAPACITY` | `4` / `20` | Parallel analyses / waiting analyses |
 
 Tables (`audit_event`, `gap_report`, `gap_finding`) are created on startup from `schema.sql`. After starting the services, wait about 40 seconds for the instance to appear in Eureka before calling it through the gateway (otherwise: 503/500 `Unable to find instance`).
+
+### Evaluation harness (`com.edupulse.audit.eval`)
+
+Measures retrieval quality (recall@k, MRR) of the RAG pipeline on a golden set of question → expected-source pairs (unanswerable questions have `"answerable": false`). One command runs it:
+
+```powershell
+# against the live system (gateway on 8080); the token is read from the environment
+$env:EVAL_TOKEN = "<jwt from POST /api/auth/token>"
+.\mvnw.cmd -q -pl audit-analytics-service compile exec:java "-Deval.args=--golden audit-analytics-service/eval/golden-set.json --url http://localhost:8080 --k 5 --out audit-analytics-service/eval/reports"
+
+# offline, from recorded results (CI, demos)
+.\mvnw.cmd -q -pl audit-analytics-service compile exec:java "-Deval.args=--golden audit-analytics-service/eval/golden-set.example.json --results audit-analytics-service/eval/recorded-results.example.json --out audit-analytics-service/target/eval-demo"
+```
+
+| Argument | Default | Meaning |
+| :--- | :--- | :--- |
+| `--golden` | `eval/golden-set.json` | Golden set file |
+| `--url` / `--results` | required (one of them) | Live system, or recorded results `{"<question>": ["source", ...]}` |
+| `--k` | `5` | Top-k |
+| `--out` | `eval/reports` | Writes `report.json` and `report.md` |
+| `--baseline` | none | Committed `report.json`; exit code `1` if recall@k or MRR dropped by more than `--max-drop` (default `0.02`) or failures increased |
+
+Exit codes: `0` ok, `1` regression, `2` bad arguments or unreadable input. A pipeline change must pass the run against the committed baseline before merge. Failed retrievals are logged, score 0 and are listed in the report instead of aborting the run.
+
+Current state: retrieval metrics only. Faithfulness is not measured yet (S4 T3), the live mode reads `citations[].source` from `POST /api/rag/query`, and `eval/golden-set.example.json` is invented sample data showing the format; the real golden set (30+ pairs) and the committed baseline report follow once ingestion (S1 T1) provides the sample documents.
 
 ### Tests
 ```powershell

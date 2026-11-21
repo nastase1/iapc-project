@@ -1,0 +1,8 @@
+{
+  "description": "EXAMPLE ONLY - format demonstration with invented documents. Replace with the real golden set (30+ pairs on the ingested sample PDFs) once S1 T1 and the shared test PDFs exist.",
+  "items": [
+    {"id": "ex-1", "question": "How long must student records be retained?", "answerable": true, "expectedSources": ["example-retention-policy.pdf"]},
+    {"id": "ex-2", "question": "Who approves exceptions to the access policy?", "answerable": true, "expectedSources": ["example-access-policy.pdf"]},
+    {"id": "ex-3", "question": "What is the capital of Australia?", "answerable": false, "expectedSources": []}
+  ]
+}

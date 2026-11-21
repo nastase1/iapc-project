@@ -49,6 +49,15 @@ edupulse:
         tenant-id: default-org
         org-unit: compliance
         roles: [ ROLE_COMPLIANCE_OFFICER ]
+  ingestion:
+    # Politica de securitate pentru surse externe (anti-SSRF). Lista goala = nicio sursa acceptata.
+    fetch:
+      allowed-domains: ${INGESTION_ALLOWED_DOMAINS:}   # lista separata prin virgula; include si subdomeniile
+      https-only: true
+      timeout: 10s
+      max-bytes: 5242880                               # 5 MB
+      allowed-content-types: text/html,application/pdf,text/plain,text/markdown
+      max-redirects: 3
 
 # Eureka Server embedded; clientul local doar citeste registry-ul (pentru rutarea lb://)
 eureka:

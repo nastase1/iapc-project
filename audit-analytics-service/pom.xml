@@ -88,6 +88,15 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+            <!-- Evaluation harness: .\mvnw.cmd -pl audit-analytics-service exec:java -Deval.args="..." -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.edupulse.audit.eval.EvalMain</mainClass>
+                    <commandlineArgs>${eval.args}</commandlineArgs>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>
