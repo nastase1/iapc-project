@@ -137,6 +137,22 @@ All client calls go through `http://localhost:8080`.
 
 ---
 
+## 🧵 Neighbor stitching (`rag-query-service`, `com.edupulse.rag.postretrieval`)
+
+`NeighborStitcher.stitch(hits, window, tokenBudget)` expands each retrieved chunk with its adjacent chunks (by `chunk_index`), merges runs of adjacent chunks into one `Passage` and removes the text overlap between them.
+
+* **Overlap dedup:** the longest suffix of the previous chunk that is also a prefix of the next one is dropped, only if it has at least `minOverlapChars` characters (shorter coincidences are kept so real text is never cut). Set `minOverlapChars` below the chunker's overlap size.
+* **Token budget:** retrieved chunks are taken first (rank order), then neighbors, nearest first, alternating before/after. A chunk that does not fit is skipped. `Passage.tokens` is the sum of the chunk tokens before overlap removal, so the real size is never above the budget. The default counter `NeighborStitcher.APPROX_TOKENS` is a rough 4 chars/token; pass the real tokenizer when available.
+* **Boundaries:** a neighbor must have the same `docId` and `version` as the hit and the requested `chunk_index`, whatever the lookup returns, so stitching never crosses documents or mixes versions.
+* **Edges:** first chunk (no previous), last chunk (no next) and single-chunk documents are covered by tests.
+* **Integration (TODO):** implement `ChunkNeighborLookup` on top of pgvector (`doc_id`, `version`, `chunk_index` metadata, from S1 T1) and call the stitcher after reranking. Tests use an in-memory lookup.
+
+```powershell
+.\mvnw.cmd -pl rag-query-service test
+```
+
+---
+
 ## 🛡️ Ingestion source security (SSRF controls)
 
 Package `com.edupulse.gateway.ingestion.security` in `gateway-ingestion-service`. Every external source (web page, remote PDF, repository docs) must be fetched through `SafeFetcher` and its text extracted through `ContentSanitizer`.
