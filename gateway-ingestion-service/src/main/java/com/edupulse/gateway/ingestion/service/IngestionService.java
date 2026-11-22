@@ -11,8 +11,10 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 @Service
@@ -24,17 +26,20 @@ public class IngestionService {
     private final DocumentChunkerService chunkerService;
     private final VectorStore vectorStore;
     private final JdbcTemplate jdbcTemplate;
+    private final TransactionTemplate transactionTemplate;
     private final IngestionProperties properties;
 
     public IngestionService(DocumentParserService parserService,
                             DocumentChunkerService chunkerService,
                             VectorStore vectorStore,
                             JdbcTemplate jdbcTemplate,
+                            TransactionTemplate transactionTemplate,
                             IngestionProperties properties) {
         this.parserService = parserService;
         this.chunkerService = chunkerService;
         this.vectorStore = vectorStore;
         this.jdbcTemplate = jdbcTemplate;
+        this.transactionTemplate = transactionTemplate;
         this.properties = properties;
     }
 
@@ -50,11 +55,19 @@ public class IngestionService {
             ParsedDocument parsedDoc = parserService.parse(sourceName, content, contentType);
             String docId = (customDocId != null && !customDocId.isBlank()) ? customDocId : parsedDoc.docId();
 
-            // Deduplication / Checksum check
-            if (isUnchanged(docId, version, tenantId, parsedDoc.checksum())) {
+            // S1 T2: Change detection via SHA-256 Checksum
+            Optional<String> existingChecksumOpt = getExistingChecksum(docId, version, tenantId);
+            boolean isExisting = existingChecksumOpt.isPresent();
+
+            if (isExisting && existingChecksumOpt.get().equalsIgnoreCase(parsedDoc.checksum())) {
                 log.info("Document '{}' (docId: {}, version: {}) is unchanged (checksum: {}), skipping re-indexing",
                         sourceName, docId, version, parsedDoc.checksum());
                 return IngestionResult.upToDate(docId, sourceName, version, parsedDoc.checksum());
+            }
+
+            if (isExisting) {
+                log.info("Change detected for document '{}' (docId: {}, version: {}). Previous checksum: {}, new checksum: {}. Performing atomic update.",
+                        sourceName, docId, version, existingChecksumOpt.get(), parsedDoc.checksum());
             }
 
             IngestionMetadata metadata = new IngestionMetadata(
@@ -75,16 +88,15 @@ public class IngestionService {
                 return IngestionResult.failed(docId, sourceName, version, "No readable text content found");
             }
 
-            // Remove previous chunks for this doc_id & version to avoid duplicates on re-run
-            removeExistingChunks(docId, version, tenantId);
+            // S1 T2: Atomic replacement of chunks within a database transaction
+            replaceChunksAtomically(docId, version, tenantId, chunks);
 
-            // Save new embeddings into pgvector
-            vectorStore.accept(chunks);
+            log.info("Successfully {} document '{}' (docId: {}, version: {}) -> {} chunks",
+                    isExisting ? "updated" : "ingested", sourceName, docId, version, chunks.size());
 
-            log.info("Successfully ingested document '{}' (docId: {}, version: {}) -> {} chunks",
-                    sourceName, docId, version, chunks.size());
-
-            return IngestionResult.success(docId, sourceName, version, chunks.size(), parsedDoc.checksum());
+            return isExisting
+                    ? IngestionResult.updated(docId, sourceName, version, chunks.size(), parsedDoc.checksum())
+                    : IngestionResult.success(docId, sourceName, version, chunks.size(), parsedDoc.checksum());
         } catch (Exception e) {
             log.error("Failed to ingest document '{}': {}", sourceName, e.getMessage(), e);
             return IngestionResult.failed(customDocId != null ? customDocId : sourceName, sourceName, version, e.getMessage());
@@ -105,17 +117,32 @@ public class IngestionService {
         );
     }
 
-    private boolean isUnchanged(String docId, String version, String tenantId, String checksum) {
+    public Optional<String> getExistingChecksum(String docId, String version, String tenantId) {
         try {
             List<String> existing = jdbcTemplate.query(
                     "SELECT metadata->>'checksum' FROM vector_store WHERE metadata->>'doc_id' = ? AND metadata->>'version' = ? AND metadata->>'tenant_id' = ? LIMIT 1",
                     (rs, rowNum) -> rs.getString(1),
                     docId, (version == null ? "1.0" : version), (tenantId == null ? "default-org" : tenantId)
             );
-            return !existing.isEmpty() && checksum.equalsIgnoreCase(existing.getFirst());
+            if (existing.isEmpty() || existing.getFirst() == null) {
+                return Optional.empty();
+            }
+            return Optional.of(existing.getFirst());
         } catch (Exception e) {
             log.debug("Could not verify existing checksum (vector_store table might be uninitialized yet): {}", e.getMessage());
-            return false;
+            return Optional.empty();
+        }
+    }
+
+    public void replaceChunksAtomically(String docId, String version, String tenantId, List<Document> chunks) {
+        if (transactionTemplate != null) {
+            transactionTemplate.executeWithoutResult(status -> {
+                removeExistingChunks(docId, version, tenantId);
+                vectorStore.accept(chunks);
+            });
+        } else {
+            removeExistingChunks(docId, version, tenantId);
+            vectorStore.accept(chunks);
         }
     }
 

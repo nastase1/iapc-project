@@ -13,6 +13,10 @@ public record IngestionResult(
         return new IngestionResult(docId, source, version, "SUCCESS", totalChunks, checksum, "Ingested successfully");
     }
 
+    public static IngestionResult updated(String docId, String source, String version, int totalChunks, String checksum) {
+        return new IngestionResult(docId, source, version, "UPDATED", totalChunks, checksum, "Document updated atomically");
+    }
+
     public static IngestionResult upToDate(String docId, String source, String version, String checksum) {
         return new IngestionResult(docId, source, version, "ALREADY_UP_TO_DATE", 0, checksum, "Document content unchanged");
     }
