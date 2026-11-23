@@ -137,6 +137,27 @@ All client calls go through `http://localhost:8080`.
 
 ---
 
+## Query normalization (S3 T2, `rag-query-service`)
+
+`POST /api/rag/query` returns the normalized text in `query`. The response also includes the tenant and the demo answer and citations. The service uses the `X-Tenant-Id` header or defaults to `default-org` when called directly without it.
+
+`QueryNormalizer` collapses Unicode whitespace to single spaces, removes trailing question marks (including runs separated by spaces), and strips consecutive leading `te rog`, `vă rog`, `va rog`, and `please` prefixes. It recognizes the prefixes regardless of case and accepts an optional comma or colon after each prefix. The rest of the text keeps its case, diacritics, acronyms, and punctuation. An omitted, null, empty, or whitespace-only query becomes an empty string. Reapplying normalization yields the same text.
+
+The original query is logged only at `TRACE` for `com.edupulse.rag.controller.ComplianceRagController`, with control characters escaped. To inspect the original text locally, set `--logging.level.com.edupulse.rag.controller.ComplianceRagController=TRACE` when starting the service and use a sample without personal data.
+
+### Postman example
+
+1. Use `POST http://localhost:8080/api/auth/token` to get an access token with the local credentials from **Quick Test** below.
+2. Send `POST http://localhost:8080/api/rag/query`. In **Authorization**, select **Bearer Token** and paste the access token. In **Body**, select **raw** and **JSON**, then enter the following.
+
+```json
+{"query":"  Vă rog,   ce spune GDPR despre păstrarea datelor???  "}
+```
+
+Expect HTTP `200 OK` and `"query": "ce spune GDPR despre păstrarea datelor"`. The gateway supplies the tenant from the token.
+
+---
+
 ## 🧵 Neighbor stitching (`rag-query-service`, `com.edupulse.rag.postretrieval`)
 
 `NeighborStitcher.stitch(hits, window, tokenBudget)` expands each retrieved chunk with its adjacent chunks (by `chunk_index`), merges runs of adjacent chunks into one `Passage` and removes the text overlap between them.
