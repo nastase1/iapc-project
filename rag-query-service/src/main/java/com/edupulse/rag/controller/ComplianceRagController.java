@@ -1,5 +1,6 @@
 package com.edupulse.rag.controller;
 
+import com.edupulse.rag.preretrieval.AcronymExpander;
 import com.edupulse.rag.preretrieval.QueryNormalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,11 +19,12 @@ public class ComplianceRagController {
     private static final Pattern LOG_CONTROLS = Pattern.compile("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]");
 
     private final QueryNormalizer queryNormalizer;
+    private final AcronymExpander acronymExpander;
 
-    public ComplianceRagController(QueryNormalizer queryNormalizer) {
+    public ComplianceRagController(QueryNormalizer queryNormalizer, AcronymExpander acronymExpander) {
         this.queryNormalizer = queryNormalizer;
+        this.acronymExpander = acronymExpander;
     }
-
 
     @PostMapping("/query")
     public ResponseEntity<Map<String, Object>> queryCompliance(
@@ -36,6 +38,7 @@ public class ComplianceRagController {
             log.trace("Original RAG query: {}", escapedQuery);
         }
         String question = queryNormalizer.normalize(originalQuery);
+        String expandedQuestion = acronymExpander.expand(question);
 
         // TODO (Membru 2): Pre-Retrieval -> MultiQueryExpander (3-4 formulari)
         // TODO (Membru 2): Retrieval -> Hybrid Search (pgvector HNSW + tsvector)
@@ -44,6 +47,7 @@ public class ComplianceRagController {
 
         return ResponseEntity.ok(Map.of(
                 "query", question,
+                "expandedQuery", expandedQuestion,
                 "tenantId", tenantId,
                 "answer", "Sample compliance response with citation.",
                 "citations", List.of(

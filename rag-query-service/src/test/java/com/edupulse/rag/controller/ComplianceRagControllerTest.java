@@ -1,10 +1,13 @@
 package com.edupulse.rag.controller;
 
+import com.edupulse.rag.preretrieval.AcronymExpander;
 import com.edupulse.rag.preretrieval.QueryNormalizer;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.nio.file.Path;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -12,7 +15,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class ComplianceRagControllerTest {
     private final MockMvc mvc = MockMvcBuilders
-            .standaloneSetup(new ComplianceRagController(new QueryNormalizer()))
+            .standaloneSetup(new ComplianceRagController(new QueryNormalizer(),
+                    new AcronymExpander(Path.of("config", "acronyms.txt").toString())))
             .build();
 
     @Test
@@ -25,6 +29,8 @@ class ComplianceRagControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.query").value("ce spune GDPR despre păstrarea datelor"))
+                .andExpect(jsonPath("$.expandedQuery")
+                        .value("ce spune GDPR (General Data Protection Regulation) despre păstrarea datelor"))
                 .andExpect(jsonPath("$.tenantId").value("school-a"))
                 .andExpect(jsonPath("$.answer").value("Sample compliance response with citation."))
                 .andExpect(jsonPath("$.citations[0].source").value("FERPA_Policy.pdf"))
@@ -39,6 +45,7 @@ class ComplianceRagControllerTest {
                         .content("{\"query\":null}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.query").value(""))
+                .andExpect(jsonPath("$.expandedQuery").value(""))
                 .andExpect(jsonPath("$.tenantId").value("default-org"));
     }
 

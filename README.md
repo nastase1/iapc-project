@@ -158,6 +158,34 @@ Expect HTTP `200 OK` and `"query": "ce spune GDPR despre păstrarea datelor"`. T
 
 ---
 
+## Acronym and synonym expansion (S3 T3, `rag-query-service`)
+
+The service normalizes the input first and returns it in `query`. It then runs `AcronymExpander.expand()` and returns the result in the additional `expandedQuery` field. The tenant, demo answer and citations are served as before.
+
+Expansion matches whole Unicode words regardless of case. It keeps the original acronym and appends its full form and any configured synonyms in parentheses. It annotates only the first eligible occurrence of each acronym and skips it if its full form already appears in the query. Queries without matches keep their text.
+
+The editable [sample dictionary](rag-query-service/config/acronyms.txt) is outside the JAR. Copy it to an accessible location or use it directly. In a PowerShell terminal at the repository root, configure and start the service as follows.
+
+```powershell
+$env:RAG_ACRONYMS_PATH = (Resolve-Path .\rag-query-service\config\acronyms.txt).Path
+.\mvnw.cmd -pl rag-query-service spring-boot:run
+```
+
+You can also set the Spring property `rag.acronyms.path` to an absolute file path. Use UTF-8 with one `ACRONYM = Full form` entry per line. Add optional synonyms after semicolons, for example `ÎS = Învățământ Secundar; studii secundare`. Blank lines and lines starting with `#` are ignored. Edit the file and restart the service to load the changes. A missing or invalid configured file, including a case-insensitive duplicate acronym, logs a startup warning and leaves expansion disabled. With no path configured, `expandedQuery` contains the normalized text.
+
+### Postman example for expansion
+
+1. With the sample dictionary configured, get an access token from `POST http://localhost:8080/api/auth/token` using the local credentials from **Quick Test** below.
+2. Send `POST http://localhost:8080/api/rag/query` with the token in **Authorization → Bearer Token**. Select **Body → raw → JSON** and send this request.
+
+```json
+{"query":"  Vă rog,  ce spun GDPR și FERPA???  "}
+```
+
+Expect HTTP `200 OK`, with `query` equal to `ce spun GDPR și FERPA` and `expandedQuery` equal to `ce spun GDPR (General Data Protection Regulation) și FERPA (Family Educational Rights and Privacy Act)`.
+
+---
+
 ## 🧵 Neighbor stitching (`rag-query-service`, `com.edupulse.rag.postretrieval`)
 
 `NeighborStitcher.stitch(hits, window, tokenBudget)` expands each retrieved chunk with its adjacent chunks (by `chunk_index`), merges runs of adjacent chunks into one `Passage` and removes the text overlap between them.

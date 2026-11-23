@@ -1,0 +1,4 @@
+# UTF-8. Format: ACRONYM = Full form; optional synonym
+GDPR = General Data Protection Regulation
+FERPA = Family Educational Rights and Privacy Act
+RGPD = Regulamentul general privind protecția datelor; Regulamentul UE privind protecția datelor
