@@ -2,10 +2,12 @@ package com.edupulse.rag.controller;
 
 import com.edupulse.rag.preretrieval.AcronymExpander;
 import com.edupulse.rag.preretrieval.QueryNormalizer;
+import com.edupulse.rag.preretrieval.SafeMetadataFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import tools.jackson.databind.JsonNode;
 
 import java.util.List;
 import java.util.Map;
@@ -20,18 +22,35 @@ public class ComplianceRagController {
 
     private final QueryNormalizer queryNormalizer;
     private final AcronymExpander acronymExpander;
+    private final SafeMetadataFilter safeMetadataFilter;
 
-    public ComplianceRagController(QueryNormalizer queryNormalizer, AcronymExpander acronymExpander) {
+    public ComplianceRagController(QueryNormalizer queryNormalizer, AcronymExpander acronymExpander,
+                                   SafeMetadataFilter safeMetadataFilter) {
         this.queryNormalizer = queryNormalizer;
         this.acronymExpander = acronymExpander;
+        this.safeMetadataFilter = safeMetadataFilter;
     }
 
     @PostMapping("/query")
     public ResponseEntity<Map<String, Object>> queryCompliance(
-            @RequestBody Map<String, String> request,
+            @RequestBody Map<String, JsonNode> request,
             @RequestHeader(value = "X-Tenant-Id", defaultValue = "default-org") String tenantId) {
 
-        String originalQuery = request.get("query");
+        SafeMetadataFilter.Conjunction filters;
+        try {
+            filters = safeMetadataFilter.validate(request.get("filters"));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "invalid_filters",
+                    "message", ex.getMessage()
+            ));
+        }
+
+        JsonNode query = request.get("query");
+        if (query != null && (query.isObject() || query.isArray())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "invalid_query", "message", "query must be a string."));
+        }
+        String originalQuery = query == null || query.isNull() ? null : query.asString();
         if (log.isTraceEnabled() && originalQuery != null) {
             String escapedQuery = LOG_CONTROLS.matcher(originalQuery).replaceAll(match ->
                     Matcher.quoteReplacement("\\u{%X}".formatted(match.group().codePointAt(0))));
@@ -49,6 +68,7 @@ public class ComplianceRagController {
                 "query", question,
                 "expandedQuery", expandedQuestion,
                 "tenantId", tenantId,
+                "appliedFilters", filters.publicFilters(),
                 "answer", "Sample compliance response with citation.",
                 "citations", List.of(
                         Map.of("source", "FERPA_Policy.pdf", "page", 4, "snippet", "Student record data privacy...")

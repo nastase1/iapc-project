@@ -137,6 +137,59 @@ All client calls go through `http://localhost:8080`.
 
 ---
 
+## Safe metadata filtering (S3 T1, `rag-query-service`)
+
+`POST /api/rag/query` accepts an optional `filters` JSON object. Every supplied field is an equality condition, and all conditions are combined with **AND**. An omitted or empty object yields `"appliedFilters": {}`.
+
+| Filter | JSON type and allowed values |
+| --- | --- |
+| `doc_id`, `source`, `version` | Nonblank string |
+| `page` | Integer from 1 to 2,147,483,647 |
+| `is_latest` | Boolean |
+| `valid_from` | ISO-8601 timestamp string with a UTC offset, such as `2026-11-25T09:00:00Z` |
+
+The endpoint accepts up to six fields and limits each string to 256 UTF-16 code units. Nulls, blank strings, incorrect JSON types, nested objects, arrays, and unknown fields return HTTP 400. The allowlist excludes `tenant_id`, `org_unit`, and `access_level`. Tenant and access constraints belong to the retrieval security context. AND is the only supported grouping.
+
+In Postman, send a POST to `http://localhost:8081/api/rag/query` with **Body → raw → JSON** while the RAG service is running locally.
+
+```json
+{
+  "query": "What does the regulation say about exams?",
+  "filters": {
+    "source": "regulation.pdf",
+    "version": "2.0",
+    "is_latest": true
+  }
+}
+```
+
+The expected HTTP 200 response uses the default tenant for a direct local request without an `X-Tenant-Id` header. The service validates and prepares the filters. Applying them to pgvector and enforcing tenant and access restrictions during retrieval are future integration work. The answer and citations still come from the demo response. Timestamps in `appliedFilters` are formatted from the parsed value.
+
+```json
+{
+  "query": "What does the regulation say about exams",
+  "expandedQuery": "What does the regulation say about exams",
+  "tenantId": "default-org",
+  "answer": "Sample compliance response with citation.",
+  "citations": [
+    {"source": "FERPA_Policy.pdf", "page": 4, "snippet": "Student record data privacy..."}
+  ],
+  "appliedFilters": {"source": "regulation.pdf", "version": "2.0", "is_latest": true}
+}
+```
+
+This invalid request sends a string where the endpoint expects an integer.
+
+```json
+{"query": "What does the regulation say about exams?", "filters": {"page": "4"}}
+```
+
+The endpoint returns HTTP 400 with this body.
+
+```json
+{"error": "invalid_filters", "message": "page must be an integer from 1 to 2147483647."}
+```
+
 ## Query normalization (S3 T2, `rag-query-service`)
 
 `POST /api/rag/query` returns the normalized text in `query`. The response also includes the tenant and the demo answer and citations. The service uses the `X-Tenant-Id` header or defaults to `default-org` when called directly without it.
